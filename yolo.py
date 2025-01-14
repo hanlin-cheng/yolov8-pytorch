@@ -9,7 +9,7 @@ from PIL import ImageDraw, ImageFont
 
 from nets.yolo import YoloBody
 from utils.utils import (cvtColor, get_classes, preprocess_input,
-                         resize_image, show_config)
+                         resize_image, show_config, get_interested_class_indices)
 from utils.utils_bbox import DecodeBox
 
 '''
@@ -25,8 +25,14 @@ class YOLO(object):
         #   验证集损失较低不代表mAP较高，仅代表该权值在验证集上泛化性能较好。
         #   如果出现shape不匹配，同时要注意训练时的model_path和classes_path参数的修改
         #--------------------------------------------------------------------------#
-        "model_path"        : 'model_data/yolov8_s.pth',
-        "classes_path"      : 'model_data/coco_classes.txt',
+        "model_path"              : 'model_data/yolov8_x.pth',
+        "classes_path"            : 'model_data/coco_classes.txt',
+        #---------------------------------------------------------------------------#
+        #   临时方案，用于指定感兴趣的类别，预训练模型使用了80种类别，最后显示在图片上的分类标签不需要这么多
+        #   类别必须是训练时有的类别，否则会报错
+        #---------------------------------------------------------------------------#
+        "use_interested_classes"  :  False,
+        "interested_classes_path" : 'model_data/interested_classes.txt',
         #---------------------------------------------------------------------#
         #   输入图片的大小，必须为32的倍数。
         #---------------------------------------------------------------------#
@@ -39,7 +45,7 @@ class YOLO(object):
         #   l : 对应yolov8_l
         #   x : 对应yolov8_x
         #------------------------------------------------------#
-        "phi"               : 's',
+        "phi"               : 'x',
         #---------------------------------------------------------------------#
         #   只有得分大于置信度的预测框会被保留下来
         #---------------------------------------------------------------------#
@@ -81,6 +87,13 @@ class YOLO(object):
         #---------------------------------------------------#
         self.class_names, self.num_classes  = get_classes(self.classes_path)
         self.bbox_util                      = DecodeBox(self.num_classes, (self.input_shape[0], self.input_shape[1]))
+
+        #---------------------------------------------------#
+        #   获得感兴趣的类别
+        #---------------------------------------------------#
+        if self.use_interested_classes:
+            interested_classes, num_interested_classes = get_classes(self.interested_classes_path)
+            self.interested_class_indices = get_interested_class_indices(interested_classes, self.class_names)
 
         #---------------------------------------------------#
         #   画框设置不同的颜色
@@ -155,6 +168,17 @@ class YOLO(object):
             top_label   = np.array(results[0][:, 5], dtype = 'int32')
             top_conf    = results[0][:, 4]
             top_boxes   = results[0][:, :4]
+
+        # ---------------------------------------------------------#
+        #   筛选出属于感兴趣类别的预测框
+        #   根据筛选的索引更新top_label, top_conf, top_boxes
+        # ---------------------------------------------------------#
+        if self.use_interested_classes:
+            selected_indices = np.where(np.isin(top_label, list(self.interested_class_indices)))[0]
+            top_label = top_label[selected_indices]
+            top_conf = top_conf[selected_indices]
+            top_boxes = top_boxes[selected_indices]
+
         #---------------------------------------------------------#
         #   设置字体与边框厚度
         #---------------------------------------------------------#
@@ -206,19 +230,23 @@ class YOLO(object):
 
             label = '{} {:.2f}'.format(predicted_class, score)
             draw = ImageDraw.Draw(image)
-            label_size = draw.textsize(label, font)
+
+            bbox = draw.textbbox((0, 0), label, font)
+            label_width = bbox[2] - bbox[0]  # 右 - 左
+            label_height = bbox[3] - bbox[1]  # 下 - 上
+
             label = label.encode('utf-8')
             print(label, top, left, bottom, right)
             
-            if top - label_size[1] >= 0:
-                text_origin = np.array([left, top - label_size[1]])
+            if top - label_height  >= 0:
+                text_origin = np.array([left, top - label_height])
             else:
                 text_origin = np.array([left, top + 1])
 
             for i in range(thickness):
                 draw.rectangle([left + i, top + i, right - i, bottom - i], outline=self.colors[c])
-            draw.rectangle([tuple(text_origin), tuple(text_origin + label_size)], fill=self.colors[c])
-            draw.text(text_origin, str(label,'UTF-8'), fill=(0, 0, 0), font=font)
+            draw.rectangle([tuple(text_origin), tuple(text_origin + np.array([label_width, label_height]))], fill=self.colors[c])
+            draw.text(text_origin, str(label, 'utf-8'), fill=(0, 0, 0), font=font)
             del draw
 
         return image

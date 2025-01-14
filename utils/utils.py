@@ -43,6 +43,17 @@ def get_classes(classes_path):
     class_names = [c.strip() for c in class_names]
     return class_names, len(class_names)
 
+#----------------------------------------------------#
+#   获取感兴趣的类别索引
+#----------------------------------------------------#
+def get_interested_class_indices(interested_classes, class_names):
+    interested_class_indices = []
+    for class_name in interested_classes:
+        if class_name in class_names:
+            # 找到类别在self.class_names中的索引
+            interested_class_indices.append(class_names.index(class_name))
+    return interested_class_indices
+
 #---------------------------------------------------#
 #   获得学习率
 #---------------------------------------------------#
